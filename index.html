@@ -557,7 +557,7 @@ function parseProduto(s){
 }
 // Preço tabelado por modelo (mesmo valor em qualquer voltagem/canal) — usado pra inferir
 // quantidade de unidades em negociações com mais de uma chopeira (Valor Único = N × preço)
-const TICKET_UNITARIO={Master:8919,Mini:6999};
+const TICKET_UNITARIO={Master:89190,Mini:69990};
 function unidades(r){
   const modelo=parseProduto(r['Modelo de Chopeira']||r['Produtos']).modelo;
   const preco=TICKET_UNITARIO[modelo];
