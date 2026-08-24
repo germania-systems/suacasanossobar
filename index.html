@@ -417,7 +417,7 @@ async function refreshTop5CplRoi(){
         if(estadoNorm(r)!=='Ganho'||isLoja(r)) return false;
         const d=parseDate(r['Data de fechamento'])||parseDate(r['Data de criação']);
         return d&&d>=mStart&&d<=mEnd;
-      }).reduce((s,r)=>s+parseBRL(r['Valor Único']),0);
+      }).reduce((s,r)=>s+valorReal(r),0);
       const invest=investVals[i];
       return {mk,invest,leads,fat,cpl:leads&&invest?invest/leads:null,roi:invest?fat/invest:null};
     }).filter(m=>m.invest>0);
@@ -511,6 +511,11 @@ function parseBRL(s,centavos=false){
   if(isNaN(v)) return 0;
   return centavos?v/100:v;
 }
+// A coluna "Valor Único" do RD CRM/Sheets está gravando 10x o valor real da venda
+// (ex: Master sai R$89.190 na planilha, mas o valor de fato faturado é R$8.919) —
+// bug na fonte, não no dashboard. Corrigido aqui na leitura pra não ter que remendar
+// cada soma de faturamento espalhada pelo código.
+function valorReal(r){return parseBRL(r['Valor Único'])/10;}
 function parseMin(s){
   if(!s||s==='-'||s==='0') return null;
   const p=s.split(':');
@@ -557,12 +562,12 @@ function parseProduto(s){
 }
 // Preço tabelado por modelo (mesmo valor em qualquer voltagem/canal) — usado pra inferir
 // quantidade de unidades em negociações com mais de uma chopeira (Valor Único = N × preço)
-const TICKET_UNITARIO={Master:89190,Mini:69990};
+const TICKET_UNITARIO={Master:8919,Mini:6999};
 function unidades(r){
   const modelo=parseProduto(r['Modelo de Chopeira']||r['Produtos']).modelo;
   const preco=TICKET_UNITARIO[modelo];
   if(!preco) return 1;
-  const qtd=Math.round(parseBRL(r['Valor Único'])/preco);
+  const qtd=Math.round(valorReal(r)/preco);
   return qtd>=1?qtd:1;
 }
 function sumUnidades(arr){return arr.reduce((s,r)=>s+unidades(r),0);}
@@ -877,7 +882,7 @@ function computeVG(from,to){
   const vendGerm=ganho.filter(r=>!isLoja(r));
   const vendLoja=ganho.filter(r=>isLoja(r));
   const uVendGerm=sumUnidades(vendGerm),uVendLoja=sumUnidades(vendLoja);
-  const fat=vendGerm.reduce((s,r)=>{return s+parseBRL(r['Valor Único']);},0);
+  const fat=vendGerm.reduce((s,r)=>{return s+valorReal(r);},0);
   const germLeadsSlice=rdSlice.filter(r=>!isLoja(r));
   const conv=germLeadsSlice.length?Math.round(uVendGerm/germLeadsSlice.length*100):0;
   const ticket=uVendGerm?fat/uVendGerm:0;
@@ -1100,7 +1105,7 @@ function renderMapaSP(ganho){
     if(!cityData[canon]) cityData[canon]={n:0,fat:0,loja:0,germ:0};
     const u=unidades(r);
     cityData[canon].n+=u;
-    cityData[canon].fat+=parseBRL(r['Valor Único']);
+    cityData[canon].fat+=valorReal(r);
     if(isLoja(r)) cityData[canon].loja+=u; else cityData[canon].germ+=u;
   });
   if(!Object.keys(cityData).length){
@@ -1247,12 +1252,12 @@ function renderHeader(rd){
   const ganho=rd.filter(r=>estadoNorm(r)==='Ganho');
   const vendGerm=ganho.filter(r=>!isLoja(r));
   const uGanho=sumUnidades(ganho),uVendGerm=sumUnidades(vendGerm);
-  const fat=vendGerm.reduce((s,r)=>{return s+parseBRL(r['Valor Único']);},0);
+  const fat=vendGerm.reduce((s,r)=>{return s+valorReal(r);},0);
   const fatHeader=rawRD.filter(r=>{
     if(estadoNorm(r)!=='Ganho') return false;
     const d=parseDate(r['Data de fechamento'])||parseDate(r['Data de criação']);
     return d&&(!dateFrom||d>=dateFrom)&&(!dateTo||d<=dateTo);
-  }).reduce((s,r)=>s+parseBRL(r['Valor Único']),0);
+  }).reduce((s,r)=>s+valorReal(r),0);
   const germLeadsH=filterRDCriacao().filter(r=>!isLoja(r));
   const conv=germLeadsH.length?Math.round(uVendGerm/germLeadsH.length*100):0;
   const ticket=uVendGerm?fat/uVendGerm:0;
@@ -1271,7 +1276,7 @@ function renderVisaoGeral(rd,ez){
   const ganho=rd.filter(r=>estadoNorm(r)==='Ganho');
   const vendGerm=ganho.filter(r=>!isLoja(r));
   const vendLoja=ganho.filter(r=>isLoja(r));
-  const fat=vendGerm.reduce((s,r)=>{return s+parseBRL(r['Valor Único']);},0);
+  const fat=vendGerm.reduce((s,r)=>{return s+valorReal(r);},0);
   // fatTotal: faturamento respeitando o filtro de canal (Todos/Germânia/Loja)
   // usa criação||fechamento igual ao filterRD — garante mesmos deals que vendGerm/vendLoja
   const computeFatAll=(from,to)=>rawRD.filter(r=>{
@@ -1281,7 +1286,7 @@ function renderVisaoGeral(rd,ez){
     if(canal==='loja'&&!isLoja(r)) return false;
     const d=parseDate(r['Data de fechamento'])||parseDate(r['Data de criação']);
     return d&&(!from||d>=from)&&(!to||d<=to);
-  }).reduce((s,r)=>s+parseBRL(r['Valor Único']),0);
+  }).reduce((s,r)=>s+valorReal(r),0);
   const fatTotal=computeFatAll(dateFrom,dateTo);
   const germLeads=rdC.filter(r=>!isLoja(r));
   const uVendGerm=sumUnidades(vendGerm),uVendLoja=sumUnidades(vendLoja);
@@ -1635,7 +1640,7 @@ function renderProduto(rd){
   const mini=modeloUnid(ganho,'Mini');
   const v110=voltUnid(ganho,'110v');
   const v220=voltUnid(ganho,'220v');
-  const fat=vendGerm.reduce((s,r)=>{return s+parseBRL(r['Valor Único']);},0);
+  const fat=vendGerm.reduce((s,r)=>{return s+valorReal(r);},0);
   const rdC=filterRDCriacao();
   // Win rate fica por negociação (não por unidade): é taxa de conversão de leads decididos, não pode passar de 100%
   const decididas=rdC.filter(r=>!isLoja(r)&&(estadoNorm(r)==='Ganho'||(estadoNorm(r)==='Perdido'&&(r['Motivo de Perda']||'').trim()!=='Não conseguiu contato')));
@@ -1654,7 +1659,7 @@ function renderProduto(rd){
     const pMaster=modeloUnid(pGanho,'Master');
     const pMini=modeloUnid(pGanho,'Mini');
     const pVendGerm=pGanho.filter(r=>!isLoja(r));
-    const pFat=pVendGerm.reduce((s,r)=>{return s+parseBRL(r['Valor Único']);},0);
+    const pFat=pVendGerm.reduce((s,r)=>{return s+valorReal(r);},0);
     const pRdC=rawRD.filter(r=>{if(canal==='germania'&&isLoja(r))return false;if(canal==='loja'&&!isLoja(r))return false;const d=parseDate(r['Data de criação']);return d&&d>=prev.from&&d<=prev.to;});
     const pDecididas=pRdC.filter(r=>!isLoja(r)&&(estadoNorm(r)==='Ganho'||(estadoNorm(r)==='Perdido'&&(r['Motivo de Perda']||'').trim()!=='Não conseguiu contato')));
     const pWinRate=pDecididas.length?Math.round(pVendGerm.length/pDecididas.length*100):0;
@@ -1743,7 +1748,7 @@ function renderPerfil(rd){
   const ganho=rd.filter(r=>estadoNorm(r)==='Ganho');
   const vendGerm=ganho.filter(r=>!isLoja(r));
   const uVendGerm=sumUnidades(vendGerm);
-  const fat=vendGerm.reduce((s,r)=>{return s+parseBRL(r['Valor Único']);},0);
+  const fat=vendGerm.reduce((s,r)=>{return s+valorReal(r);},0);
   const ticket=uVendGerm?fat/uVendGerm:0;
   const topProduto=freq(vendGerm,'Produtos')[0]?.[0]||'';
   const topModelo=parseProduto(topProduto).modelo||'--';
@@ -1969,7 +1974,7 @@ function renderMarketing(rd){
   const rdC=filterRDCriacao().filter(r=>!isLoja(r));
   const ganhoGerm=rd.filter(r=>estadoNorm(r)==='Ganho'&&!isLoja(r));
   const uGanhoGerm=sumUnidades(ganhoGerm);
-  const fat=ganhoGerm.reduce((s,r)=>{return s+parseBRL(r['Valor Único']);},0);
+  const fat=ganhoGerm.reduce((s,r)=>{return s+valorReal(r);},0);
   const apiReady=_adsApiCache&&_adsApiCache.key===adsApiKey();
   if(!apiReady){document.getElementById('mk-invest').textContent='...';return;}
   const investTotal=_adsApiCache.investTotal;
@@ -1992,7 +1997,7 @@ function renderMarketing(rd){
     const pRdC=rawRD.filter(r=>{if(isLoja(r))return false;const d=parseDate(r['Data de criação']);return d&&d>=prev.from&&d<=prev.to;});
     const pGanhoGerm=pRdC.filter(r=>estadoNorm(r)==='Ganho');
     const uPGanhoGerm=sumUnidades(pGanhoGerm);
-    const pFat=pGanhoGerm.reduce((s,r)=>{return s+parseBRL(r['Valor Único']);},0);
+    const pFat=pGanhoGerm.reduce((s,r)=>{return s+valorReal(r);},0);
     const pInvest=_adsApiCache.prevInvestTotal;
     const pLeadsAds=pRdC.length;
     const pCpl=pLeadsAds&&pInvest?pInvest/pLeadsAds:0;
