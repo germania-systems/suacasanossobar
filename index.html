@@ -354,12 +354,41 @@ function bucketConfig(periodDays){
     maxTicks:18,
   };
 }
+// Cache persistente (localStorage) de gasto por intervalo — evita rebuscar dias já
+// consultados em sessões anteriores. Só guarda intervalos que terminam antes de ontem,
+// pois gasto de hoje/ontem ainda pode ser ajustado pela Meta.
+const ADS_SPEND_CACHE_KEY='scnbAdsSpendCache_v1';
+let _adsSpendCache=null;
+function loadAdsSpendCache(){
+  if(_adsSpendCache) return _adsSpendCache;
+  try{_adsSpendCache=JSON.parse(localStorage.getItem(ADS_SPEND_CACHE_KEY)||'{}');}catch(e){_adsSpendCache={};}
+  return _adsSpendCache;
+}
+function saveAdsSpendCache(){
+  try{localStorage.setItem(ADS_SPEND_CACHE_KEY,JSON.stringify(_adsSpendCache));}catch(e){}
+}
+// Dedup de requisições em voo — refreshADSApi (no filtro "Tudo") e refreshTop5CplRoi
+// pedem os mesmos meses ao backend quase simultaneamente; sem isso, os dois disparam
+// antes de qualquer um escrever no cache e duplicam a chamada.
+let _adsSpendInflight={};
 async function fetchScnbSpend(since,until){
-  const res=await fetch(ADS_API+'/api/campaigns?since='+since+'&until='+until);
-  if(!res.ok) throw new Error('HTTP '+res.status);
-  const data=await res.json();
-  const scnb=(data.data||[]).filter(c=>{const n=(c.name||'').toUpperCase();return n.includes('SUA CASA')||n.includes('NOSSO BAR');});
-  return scnb.reduce((s,c)=>s+(Number(c.spend)||0),0);
+  const cache=loadAdsSpendCache();
+  const ck=since+'|'+until;
+  const yesterdayY=fmtYMD(new Date(Date.now()-864e5));
+  const frozen=until<yesterdayY;
+  if(frozen&&cache[ck]!==undefined) return cache[ck];
+  if(_adsSpendInflight[ck]) return _adsSpendInflight[ck];
+  const p=(async()=>{
+    const res=await fetch(ADS_API+'/api/campaigns?since='+since+'&until='+until);
+    if(!res.ok) throw new Error('HTTP '+res.status);
+    const data=await res.json();
+    const scnb=(data.data||[]).filter(c=>{const n=(c.name||'').toUpperCase();return n.includes('SUA CASA')||n.includes('NOSSO BAR');});
+    const total=scnb.reduce((s,c)=>s+(Number(c.spend)||0),0);
+    if(frozen){cache[ck]=total;saveAdsSpendCache();}
+    return total;
+  })();
+  _adsSpendInflight[ck]=p;
+  try{return await p;}finally{delete _adsSpendInflight[ck];}
 }
 async function refreshADSApi(){
   if(!dateFrom) return;
@@ -379,11 +408,12 @@ async function refreshADSApi(){
     }
     const bucketKeys=Object.keys(bucketRanges);
     const prev=getPrevPeriod();
-    const [investTotal,bucketVals,prevInvestTotal]=await Promise.all([
-      fetchScnbSpend(since,until),
+    const [bucketVals,prevInvestTotal]=await Promise.all([
       Promise.all(bucketKeys.map(k=>fetchScnbSpend(fmtYMD(bucketRanges[k].min),fmtYMD(bucketRanges[k].max)))),
       prev?fetchScnbSpend(fmtYMD(prev.from),fmtYMD(new Date(Math.min(prev.to.getTime(),Date.now())))):Promise.resolve(null),
     ]);
+    // investTotal = soma dos buckets (que já particionam o período todo) — evita 1 chamada redundante à API
+    const investTotal=bucketVals.reduce((s,v)=>s+v,0);
     const buckets={};
     bucketKeys.forEach((k,i)=>buckets[k]=bucketVals[i]);
     _adsApiCache={key,investTotal,prevInvestTotal,buckets,periodDays};
@@ -1126,9 +1156,9 @@ function renderMapaSP(ganho){
     try{
       _mapaLeaflet=L.map(el,{zoomControl:true,scrollWheelZoom:false})
         .setView([-22.5,-48.5],7);
-      L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png',{
-        attribution:'&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> &copy; <a href="https://carto.com/attributions">CARTO</a>',
-        subdomains:'abcd',maxZoom:19
+      L.tileLayer('https://services.arcgisonline.com/arcgis/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}',{
+        attribution:'&copy; <a href="https://www.esri.com">Esri</a>',
+        maxZoom:16
       }).addTo(_mapaLeaflet);
     }catch(e){console.error('Leaflet init:',e);_mapaLeaflet=null;return;}
   } else {
