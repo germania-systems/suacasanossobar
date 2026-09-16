@@ -541,11 +541,10 @@ function parseBRL(s,centavos=false){
   if(isNaN(v)) return 0;
   return centavos?v/100:v;
 }
-// A coluna "Valor Único" do RD CRM/Sheets está gravando 10x o valor real da venda
-// (ex: Master sai R$89.190 na planilha, mas o valor de fato faturado é R$8.919) —
-// bug na fonte, não no dashboard. Corrigido aqui na leitura pra não ter que remendar
-// cada soma de faturamento espalhada pelo código.
-function valorReal(r){return parseBRL(r['Valor Único'])/10;}
+// A RD CRM corrigiu do lado dela o bug que gravava "Valor Único" 10x inflado
+// (confirmado direto na planilha em 16/09/2026: Master = 8919, Mini = 6999,
+// já no valor real). Não dividir mais por 10 aqui.
+function valorReal(r){return parseBRL(r['Valor Único']);}
 function parseMin(s){
   if(!s||s==='-'||s==='0') return null;
   const p=s.split(':');
